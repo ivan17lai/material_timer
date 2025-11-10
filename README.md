@@ -1,3 +1,3 @@
 # material_timer
 
-<img width="944" height="668" alt="image" src="https://github.com/user-attachments/assets/9b961c9c-2aee-4940-838a-c2c17b0fe2c0" />
+<img width="1076" height="801" alt="image" src="https://github.com/user-attachments/assets/a0ef6b6c-d561-4013-8141-7eca35280684" />
