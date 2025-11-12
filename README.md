@@ -1,16 +1,3 @@
 # material_timer
-
-A material_timer
-
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+[![Download](https://img.shields.io/badge/Download-v1.0.0-blue.svg)](https://github.com/ivan17lai/material_timer/releases/tag/v1.0.0)
+<img width="1076" height="801" alt="image" src="https://github.com/user-attachments/assets/a0ef6b6c-d561-4013-8141-7eca35280684" />
