@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +49,7 @@ class SettingPage extends StatefulWidget {
 
 class _SettingPageState extends State<SettingPage> {
   bool alwaysOnTop = true;
+  List<Duration> savedTimers = [];
 
   int countDownHours = 0;
   int countDownMinutes = 0;
@@ -70,7 +73,25 @@ class _SettingPageState extends State<SettingPage> {
   void initState() {
     super.initState();
     _controller.text = countDownHours.toString().padLeft(2, '0');
+    _loadTimers();
   }
+
+  Future<void> _saveTimers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String> stringList = savedTimers.map((d) => d.inSeconds.toString()).toList();
+    await prefs.setStringList('saved_timers', stringList);
+  }
+
+  Future<void> _loadTimers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String>? stringList = prefs.getStringList('saved_timers');
+    if (stringList != null) {
+      setState(() {
+        savedTimers = stringList.map((s) => Duration(seconds: int.parse(s))).toList();
+      });
+    }
+  }
+
 
   Widget _timeBox({
     required String label,
@@ -81,16 +102,41 @@ class _SettingPageState extends State<SettingPage> {
   }) {
     bool hovering = false;
     bool editing = false;
+    bool isPressing = false;        // ✅ 按住箭頭期間，不要讓 onExit 把 hover 關掉
+    Timer? holdTimer;               // ✅ 保持選中用計時器
 
     return StatefulBuilder(
       builder: (context, setLocal) {
+        void updateValue(int newVal) {
+          onChanged(newVal);
+          controller.text = newVal.toString().padLeft(2, '0');
+        }
+
+        void keepSelectedFor(Duration d) {
+          holdTimer?.cancel();
+          setLocal(() => hovering = true); // 只要有操作就維持 hover
+          holdTimer = Timer(d, () {
+            // 2 秒到期才會把 hover 關掉；有焦點就繼續留著
+            if (!focusNode.hasFocus && !isPressing) {
+              setLocal(() {
+                hovering = false;
+                editing = false;
+              });
+            }
+          });
+        }
+
         return MouseRegion(
           onEnter: (_) => setLocal(() => hovering = true),
-          onExit: (_) => setLocal(() {
-            hovering = false;
-            editing = false;
-            focusNode.unfocus();
-          }),
+          onExit: (_) {
+            // ✅ 只有不在按壓、也沒焦點時，才考慮關閉
+            if (isPressing || focusNode.hasFocus) {
+              // 什麼都不做，維持選中
+              return;
+            }
+            // 給一個寬限時間；滑鼠離開也先撐 2 秒
+            keepSelectedFor(const Duration(seconds: 2));
+          },
           child: GestureDetector(
             onTap: () {
               setLocal(() {
@@ -101,14 +147,18 @@ class _SettingPageState extends State<SettingPage> {
                   extentOffset: controller.text.length,
                 );
               });
+              keepSelectedFor(const Duration(seconds: 2));
             },
             child: Container(
               width: 160,
               height: 160,
-              margin: const EdgeInsets.only(left: 12, right: 12),
+              margin: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: hovering ? Colors.grey.shade400 : Colors.transparent,
+                ),
                 boxShadow: [
                   if (hovering)
                     BoxShadow(
@@ -117,48 +167,46 @@ class _SettingPageState extends State<SettingPage> {
                       offset: const Offset(0, 2),
                     ),
                 ],
-                border: Border.all(
-                  color: hovering ? Colors.grey.shade400 : Colors.transparent,
-                ),
               ),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
+                  // ===== 顯示 / 編輯 =====
                   editing
                       ? RawKeyboardListener(
                     focusNode: focusNode,
                     onKey: (event) {
                       if (event is! RawKeyDownEvent) return;
-
                       if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                        onChanged((value + 1).clamp(0, 99));
-                        controller.text =
-                            (value + 1).clamp(0, 99).toString().padLeft(2, '0');
-                      } else if (event.logicalKey ==
-                          LogicalKeyboardKey.arrowDown) {
-                        onChanged((value - 1).clamp(0, 99));
-                        controller.text =
-                            (value - 1).clamp(0, 99).toString().padLeft(2, '0');
-                      } else if (event.logicalKey ==
-                          LogicalKeyboardKey.enter) {
+                        updateValue((value + 1).clamp(0, 99));
+                        keepSelectedFor(const Duration(seconds: 2));
+                      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                        updateValue((value - 1).clamp(0, 99));
+                        keepSelectedFor(const Duration(seconds: 2));
+                      } else if (event.logicalKey == LogicalKeyboardKey.enter) {
                         final val = int.tryParse(controller.text) ?? value;
-                        onChanged(val.clamp(0, 99));
-                        controller.text =
-                            val.clamp(0, 99).toString().padLeft(2, '0');
+                        updateValue(val.clamp(0, 99));
                         setLocal(() => editing = false);
                         focusNode.unfocus();
+                        keepSelectedFor(const Duration(seconds: 2));
                       }
                     },
-                    child: TextField(
-                      controller: controller,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 56,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
+                    child: Focus(
+                      onFocusChange: (hasFocus) {
+                        if (!hasFocus) setLocal(() => editing = false);
+                      },
+                      child: TextField(
+                        controller: controller,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 56,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Consolas',
+                        ),
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                        ),
                       ),
                     ),
                   )
@@ -167,25 +215,46 @@ class _SettingPageState extends State<SettingPage> {
                     style: const TextStyle(
                       fontSize: 56,
                       fontWeight: FontWeight.bold,
+                      fontFamily: 'Consolas',
                     ),
                   ),
+
+                  // ===== 上下箭頭（穩定版）=====
                   if (hovering)
                     Positioned(
                       right: 6,
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _arrowButton(Icons.keyboard_arrow_up, () {
-                            onChanged((value + 1).clamp(0, 99));
-                            controller.text =
-                                (value + 1).clamp(0, 99).toString().padLeft(2, '0');
-                          }),
+                          Listener(
+                            onPointerDown: (_) {
+                              isPressing = true;
+                              focusNode.requestFocus();
+                              setLocal(() => hovering = true);
+                              updateValue((value + 1).clamp(0, 99));
+                              keepSelectedFor(const Duration(seconds: 2));
+                            },
+                            onPointerUp: (_) {
+                              isPressing = false;
+                              keepSelectedFor(const Duration(seconds: 2));
+                            },
+                            child: _arrowButton(Icons.keyboard_arrow_up, () {}),
+                          ),
                           const SizedBox(height: 6),
-                          _arrowButton(Icons.keyboard_arrow_down, () {
-                            onChanged((value - 1).clamp(0, 99));
-                            controller.text =
-                                (value - 1).clamp(0, 99).toString().padLeft(2, '0');
-                          }),
+                          Listener(
+                            onPointerDown: (_) {
+                              isPressing = true;
+                              focusNode.requestFocus();
+                              setLocal(() => hovering = true);
+                              updateValue((value - 1).clamp(0, 99));
+                              keepSelectedFor(const Duration(seconds: 2));
+                            },
+                            onPointerUp: (_) {
+                              isPressing = false;
+                              keepSelectedFor(const Duration(seconds: 2));
+                            },
+                            child: _arrowButton(Icons.keyboard_arrow_down, () {}),
+                          ),
                         ],
                       ),
                     ),
@@ -197,6 +266,11 @@ class _SettingPageState extends State<SettingPage> {
       },
     );
   }
+
+
+
+
+
 
   Future<void> _startFloatTimer() async {
     final totalSeconds =
@@ -354,6 +428,10 @@ class _SettingPageState extends State<SettingPage> {
                 children: [
                   InkWell(
                     onTap: _startFloatTimer,
+                    focusColor: Colors.transparent,
+                    splashColor: Colors.transparent,
+                    highlightColor: Colors.transparent,
+                    hoverColor: Colors.transparent,
                     child: Container(
                       width: 45,
                       height: 45,
@@ -371,18 +449,35 @@ class _SettingPageState extends State<SettingPage> {
                     ),
                   ),
                   SizedBox(width: 10),
-                  Container(
-                    width: 40,
-                    height: 40,
-                    margin: EdgeInsets.only(top: 20),
-                    decoration: BoxDecoration(
-                      color: Color.fromARGB(70, 100, 100, 255),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child:Icon(
-                        Icons.refresh,
-                        color: Colors.white,
+                  InkWell(
+                    focusColor: Colors.transparent,
+                    splashColor: Colors.transparent,
+                    highlightColor: Colors.transparent,
+                    hoverColor: Colors.transparent,
+                    onTap: (){
+                      countDownHours = 0;
+                      countDownMinutes = 0;
+                      countDownSeconds = 0;
+                      _controllerHour.text = '00';
+                      _controllerMin.text = '00';
+                      _controllerSec.text = '00';
+                      setState(() {
+
+                      });
+                    },
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      margin: EdgeInsets.only(top: 20),
+                      decoration: BoxDecoration(
+                        color: Color.fromARGB(70, 100, 100, 255),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(
+                        child:Icon(
+                          Icons.refresh,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ),
@@ -395,7 +490,7 @@ class _SettingPageState extends State<SettingPage> {
             Container(
               padding: EdgeInsets.only(left: 36,bottom: 10),
               child: Text(
-                '已儲存的計時器',
+                '已儲存的計時器 (按兩下直接開始)',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
@@ -404,110 +499,91 @@ class _SettingPageState extends State<SettingPage> {
               ),
             ),
             Container(
-              padding: EdgeInsets.only(left: 36),
+              padding: const EdgeInsets.only(left: 36),
               child: Row(
                 children: [
-                  InkWell(
-                    onTap: () {
-                      setState(() {
-                        countDownHours = 0;
-                        countDownMinutes = 5;
-                        countDownSeconds = 0;
-                        _controllerHour.text = '00';
-                        _controllerMin.text = '05';
-                        _controllerSec.text = '00';
-                      });
-                    },
-                    onDoubleTap: (){
-                      setState(() {
-                        countDownHours = 0;
-                        countDownMinutes = 1;
-                        countDownSeconds = 30;
-                        _controllerHour.text = '00';
-                        _controllerMin.text = '01';
-                        _controllerSec.text = '30';
-                      });
-                      _startFloatTimer();
-                    },
-                    child: Container(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      height: 50,
-                      child: Center(
-                        child: Text(
-                          '00:05:00',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
+                  // ==== 動態生成所有已儲存計時器 ====
+                  ...savedTimers.map((d) {
+                    final h = d.inHours.toString().padLeft(2, '0');
+                    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+                    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: InkWell(
+                        onTap: () {
+                          setState(() {
+                            countDownHours = d.inHours;
+                            countDownMinutes = d.inMinutes % 60;
+                            countDownSeconds = d.inSeconds % 60;
+                            _controllerHour.text = h;
+                            _controllerMin.text = m;
+                            _controllerSec.text = s;
+                          });
+                        },
+                        onDoubleTap: () {
+                          setState(() {
+                            countDownHours = d.inHours;
+                            countDownMinutes = d.inMinutes % 60;
+                            countDownSeconds = d.inSeconds % 60;
+                            _controllerHour.text = h;
+                            _controllerMin.text = m;
+                            _controllerSec.text = s;
+                          });
+                          _startFloatTimer();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Center(
+                            child: Text(
+                              "$h:$m:$s",
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 15,
-                  ),
-                  InkWell(
-                    onTap: () {
+                    );
+                  }).toList(),
+
+                  // ==== 新增「＋」按鈕 ====
+                  GestureDetector(
+                    onTap: () async {
+                      final total = countDownHours * 3600 +
+                          countDownMinutes * 60 +
+                          countDownSeconds;
+                      if (total == 0) return;
+                      final newDuration = Duration(seconds: total);
+
                       setState(() {
-                        countDownHours = 0;
-                        countDownMinutes = 1;
-                        countDownSeconds = 30;
-                        _controllerHour.text = '00';
-                        _controllerMin.text = '01';
-                        _controllerSec.text = '30';
+                        if (!savedTimers.contains(newDuration)) {
+                          savedTimers.add(newDuration);
+                        }
                       });
+
+                      await _saveTimers(); //儲存到本地
                     },
-                    onDoubleTap: (){
-                      setState(() {
-                        countDownHours = 0;
-                        countDownMinutes = 1;
-                        countDownSeconds = 30;
-                        _controllerHour.text = '00';
-                        _controllerMin.text = '01';
-                        _controllerSec.text = '30';
-                      });
-                      _startFloatTimer();
-                    },
+
                     child: Container(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
+                        color: const Color.fromARGB(70, 100, 100, 255),
+                        borderRadius: BorderRadius.circular(40),
                       ),
-                      height: 50,
-                      child: Center(
-                        child: Text(
-                          '00:01:30',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 15,
-                  ),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Color.fromARGB(70, 100, 100, 255),
-                      borderRadius: BorderRadius.circular(40),
-                    ),
-                    height: 40,
-                    width: 40,
-                    child: Icon(
-                        Icons.add,
-                        color: Colors.white,
+                      height: 40,
+                      width: 40,
+                      child: const Icon(Icons.add, color: Colors.white),
                     ),
                   ),
                 ],
               ),
             ),
+
 
             const SizedBox(height: 20),
             // Container(
@@ -615,6 +691,24 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
   bool _isBlinking = false;
   bool _blinkVisible = true;
 
+  final AudioPlayer _alarmPlayer = AudioPlayer();
+  bool _isAlarmPlaying = false;
+
+  Future<void> _playAlarm() async {
+    if (_isAlarmPlaying) return; // 防止重複播放
+    _isAlarmPlaying = true;
+
+    await _alarmPlayer.setReleaseMode(ReleaseMode.loop); // 🔁 持續重複播放
+    await _alarmPlayer.play(AssetSource('sounds/done.mp3')); // 播放你的音效
+  }
+
+  Future<void> _stopAlarm() async {
+    if (_isAlarmPlaying) {
+      await _alarmPlayer.stop(); // 立即停止
+      _isAlarmPlaying = false;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -633,7 +727,12 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
         timer?.cancel();
         setState(() => running = false);
         _startBlink();
+        _playAlarm(); //播放提示音
       }
+
+
+
+
     });
   }
 
@@ -667,16 +766,19 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
   void _reset() {
     timer?.cancel();
     _stopBlink();
+    _stopAlarm(); // 關閉提示音
     setState(() {
       remaining = widget.initialDuration;
       running = false;
     });
   }
 
+
   @override
   void dispose() {
     timer?.cancel();
     blinkTimer?.cancel();
+    _alarmPlayer.dispose();
     super.dispose();
   }
 
@@ -727,6 +829,7 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
                         duration: const Duration(milliseconds: 200),
                         child: GestureDetector(
                           onTap: () async {
+                            _stopAlarm(); // 關閉提示音
                             await windowManager.setAlwaysOnTop(false);
                             await windowManager.setSize(const Size(900, 610));
                             await windowManager.center();
