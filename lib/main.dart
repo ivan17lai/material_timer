@@ -4,6 +4,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:file_selector/file_selector.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +56,10 @@ class _SettingPageState extends State<SettingPage> {
   int countDownMinutes = 0;
   int countDownSeconds = 0;
 
+  final PageController _pageController = PageController();
+  String? selectedSoundPath;
+
+
   final _controllerHour = TextEditingController(text: "00");
   final _controllerMin = TextEditingController(text: "00");
   final _controllerSec = TextEditingController(text: "00");
@@ -74,12 +79,24 @@ class _SettingPageState extends State<SettingPage> {
     super.initState();
     _controller.text = countDownHours.toString().padLeft(2, '0');
     _loadTimers();
+    _loadSelectedSound();
   }
 
   Future<void> _saveTimers() async {
     final prefs = await SharedPreferences.getInstance();
     final List<String> stringList = savedTimers.map((d) => d.inSeconds.toString()).toList();
     await prefs.setStringList('saved_timers', stringList);
+  }
+
+  Future<void> _loadSelectedSound() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? path = prefs.getString("selected_mp3");
+
+    if (path != null) {
+      setState(() {
+        selectedSoundPath = path;
+      });
+    }
   }
 
   Future<void> _loadTimers() async {
@@ -91,6 +108,127 @@ class _SettingPageState extends State<SettingPage> {
       });
     }
   }
+
+
+  Future<void> _pickMp3() async {
+    final XFile? file = await openFile(
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: 'MP3',
+          extensions: ['mp3'],
+        ),
+      ],
+    );
+
+    if (file != null) {
+      setState(() {
+        selectedSoundPath = file.path;
+      });
+
+      final prefs = await SharedPreferences.getInstance();
+      prefs.setString("selected_mp3", selectedSoundPath!);
+    }
+  }
+  void _openSoundPickerDialog() async {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          backgroundColor: Colors.grey.shade200,
+          title: Text("選擇提示音"),
+          content: SizedBox(
+            width: 300,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ====== 內建音效 ======
+                _soundItem(
+                  title: "預設：提示音",
+                  subtitle: "done.mp3",
+                  isSelected: selectedSoundPath == null,
+                  onTap: () async {
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.remove("selected_mp3");
+                    setState(() {
+                      selectedSoundPath = null;
+                    });
+                    Navigator.pop(context);
+                  },
+                ),
+
+                SizedBox(height: 10),
+
+                // ====== 自訂 MP3 ======
+                _soundItem(
+                  title: "自訂音效（MP3）",
+                  subtitle: selectedSoundPath == null
+                      ? "尚未選擇"
+                      : selectedSoundPath!.split('\\').last,
+                  isSelected: selectedSoundPath != null,
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _pickMp3(); // 跳主檔案選擇器
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+  Widget _soundItem({
+    required String title,
+    required String subtitle,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSelected ? Color(0xFF7F7FF8) : Colors.transparent,
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12,
+              blurRadius: 4,
+            )
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.music_note, color: Colors.black54),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
+                  Text(subtitle, style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, color: Color(0xFF7F7FF8)),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+
 
 
   Widget _timeBox({
@@ -273,6 +411,13 @@ class _SettingPageState extends State<SettingPage> {
 
 
   Future<void> _startFloatTimer() async {
+// 強制清除 Flutter + Windows OS 的所有 TextField 焦點
+    FocusManager.instance.primaryFocus?.unfocus();
+    FocusScope.of(context).unfocus();
+
+// 再加這行：強制新建一個空白焦點 → 會把所有 highlight 全部清掉
+    FocusScope.of(context).requestFocus(FocusNode());
+
     final totalSeconds =
         countDownHours * 3600 + countDownMinutes * 60 + countDownSeconds;
     final duration = Duration(seconds: totalSeconds);
@@ -349,270 +494,409 @@ class _SettingPageState extends State<SettingPage> {
                       icon: Icons.settings,
                       iconColor: Colors.white,
                       onTap: () async {
-
+                        _pageController.animateToPage(
+                          1,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        );
                       },
                     ),
+
                   ],
                 ),
               ),
             ),
 
-            // ==== 時間區域 ====
-            Container(
-              height: 350,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+            Expanded(
+              child: PageView(
+                controller: _pageController,
+                // physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  Container(
-                    width: 50,
-                    height: 50,
-                    margin: const EdgeInsets.only(left: 12, right: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.black12,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Icon(Icons.arrow_left, size: 28),
-                  ),
-
-                  // ======== 小時 ========
-                  _timeBox(
-                    label: "時",
-                    value: countDownHours,
-                    controller: _controllerHour,
-                    focusNode: _focusHour,
-                    onChanged: (v) => setState(() => countDownHours = v),
-                  ),
-
-                  const Text(":", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-
-                  // ======== 分鐘 ========
-                  _timeBox(
-                    label: "分",
-                    value: countDownMinutes,
-                    controller: _controllerMin,
-                    focusNode: _focusMin,
-                    onChanged: (v) => setState(() => countDownMinutes = v),
-                  ),
-
-                  const Text(":", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-
-                  // ======== 秒數 ========
-                  _timeBox(
-                    label: "秒",
-                    value: countDownSeconds,
-                    controller: _controllerSec,
-                    focusNode: _focusSec,
-                    onChanged: (v) => setState(() => countDownSeconds = v),
-                  ),
-
-                  Container(
-                    width: 50,
-                    height: 50,
-                    margin: const EdgeInsets.only(left: 12, right: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.black12,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Icon(Icons.arrow_right, size: 28),
-                  ),
-                ],
-              ),
-            ),
-
-            Container(
-              width: 900,
-              padding: EdgeInsets.only(left: 36,bottom: 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  InkWell(
-                    onTap: _startFloatTimer,
-                    focusColor: Colors.transparent,
-                    splashColor: Colors.transparent,
-                    highlightColor: Colors.transparent,
-                    hoverColor: Colors.transparent,
-                    child: Container(
-                      width: 45,
-                      height: 45,
-                      margin: EdgeInsets.only(top: 20),
-                      decoration: BoxDecoration(
-                        color: Color.fromARGB(200, 100, 100, 255),
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Center(
-                        child:Icon(
-                          Icons.play_arrow,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 10),
-                  InkWell(
-                    focusColor: Colors.transparent,
-                    splashColor: Colors.transparent,
-                    highlightColor: Colors.transparent,
-                    hoverColor: Colors.transparent,
-                    onTap: (){
-                      countDownHours = 0;
-                      countDownMinutes = 0;
-                      countDownSeconds = 0;
-                      _controllerHour.text = '00';
-                      _controllerMin.text = '00';
-                      _controllerSec.text = '00';
-                      setState(() {
-
-                      });
-                    },
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      margin: EdgeInsets.only(top: 20),
-                      decoration: BoxDecoration(
-                        color: Color.fromARGB(70, 100, 100, 255),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Center(
-                        child:Icon(
-                          Icons.refresh,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            Container(
-              padding: EdgeInsets.only(left: 36,bottom: 10),
-              child: Text(
-                '已儲存的計時器 (按兩下直接開始)',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black54,
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.only(left: 36),
-              child: Row(
-                children: [
-                  // ==== 動態生成所有已儲存計時器 ====
-                  ...savedTimers.map((d) {
-                    final h = d.inHours.toString().padLeft(2, '0');
-                    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
-                    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 12),
-                      child: InkWell(
-                        onTap: () {
-                          setState(() {
-                            countDownHours = d.inHours;
-                            countDownMinutes = d.inMinutes % 60;
-                            countDownSeconds = d.inSeconds % 60;
-                            _controllerHour.text = h;
-                            _controllerMin.text = m;
-                            _controllerSec.text = s;
-                          });
-                        },
-                        onDoubleTap: () {
-                          setState(() {
-                            countDownHours = d.inHours;
-                            countDownMinutes = d.inMinutes % 60;
-                            countDownSeconds = d.inSeconds % 60;
-                            _controllerHour.text = h;
-                            _controllerMin.text = m;
-                            _controllerSec.text = s;
-                          });
-                          _startFloatTimer();
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          height: 50,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Center(
-                            child: Text(
-                              "$h:$m:$s",
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      // ==== 時間區域 ====
+                      Container(
+                        height: 350,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 50,
+                              height: 50,
+                              margin: const EdgeInsets.only(left: 12, right: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.black12,
+                                borderRadius: BorderRadius.circular(20),
                               ),
+                              child: const Icon(Icons.arrow_left, size: 28),
+                            ),
+
+                            // ======== 小時 ========
+                            _timeBox(
+                              label: "時",
+                              value: countDownHours,
+                              controller: _controllerHour,
+                              focusNode: _focusHour,
+                              onChanged: (v) => setState(() => countDownHours = v),
+                            ),
+
+                            const Text(":", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+
+                            // ======== 分鐘 ========
+                            _timeBox(
+                              label: "分",
+                              value: countDownMinutes,
+                              controller: _controllerMin,
+                              focusNode: _focusMin,
+                              onChanged: (v) => setState(() => countDownMinutes = v),
+                            ),
+
+                            const Text(":", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+
+                            // ======== 秒數 ========
+                            _timeBox(
+                              label: "秒",
+                              value: countDownSeconds,
+                              controller: _controllerSec,
+                              focusNode: _focusSec,
+                              onChanged: (v) => setState(() => countDownSeconds = v),
+                            ),
+
+                            Container(
+                              width: 50,
+                              height: 50,
+                              margin: const EdgeInsets.only(left: 12, right: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.black12,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Icon(Icons.arrow_right, size: 28),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      Container(
+                        width: 900,
+                        padding: EdgeInsets.only(left: 36,bottom: 10),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            InkWell(
+                              onTap: _startFloatTimer,
+                              focusColor: Colors.transparent,
+                              splashColor: Colors.transparent,
+                              highlightColor: Colors.transparent,
+                              hoverColor: Colors.transparent,
+                              child: Container(
+                                width: 45,
+                                height: 45,
+                                margin: EdgeInsets.only(top: 20),
+                                decoration: BoxDecoration(
+                                  color: Color.fromARGB(200, 100, 100, 255),
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                child: Center(
+                                  child:Icon(
+                                    Icons.play_arrow,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            InkWell(
+                              focusColor: Colors.transparent,
+                              splashColor: Colors.transparent,
+                              highlightColor: Colors.transparent,
+                              hoverColor: Colors.transparent,
+                              onTap: (){
+                                countDownHours = 0;
+                                countDownMinutes = 0;
+                                countDownSeconds = 0;
+                                _controllerHour.text = '00';
+                                _controllerMin.text = '00';
+                                _controllerSec.text = '00';
+                                setState(() {
+
+                                });
+                              },
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                margin: EdgeInsets.only(top: 20),
+                                decoration: BoxDecoration(
+                                  color: Color.fromARGB(70, 100, 100, 255),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Center(
+                                  child:Icon(
+                                    Icons.refresh,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      Container(
+                        padding: EdgeInsets.only(left: 36,bottom: 10),
+                        child: Text(
+                          '已儲存的計時器 (按兩下直接開始)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.only(left: 36),
+                        child: Row(
+                          children: [
+                            // ==== 動態生成所有已儲存計時器 ====
+                            ...savedTimers.map((d) {
+                              final h = d.inHours.toString().padLeft(2, '0');
+                              final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+                              final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: InkWell(
+                                  onTap: () {
+                                    setState(() {
+                                      countDownHours = d.inHours;
+                                      countDownMinutes = d.inMinutes % 60;
+                                      countDownSeconds = d.inSeconds % 60;
+                                      _controllerHour.text = h;
+                                      _controllerMin.text = m;
+                                      _controllerSec.text = s;
+                                    });
+                                  },
+                                  onDoubleTap: () {
+                                    setState(() {
+                                      countDownHours = d.inHours;
+                                      countDownMinutes = d.inMinutes % 60;
+                                      countDownSeconds = d.inSeconds % 60;
+                                      _controllerHour.text = h;
+                                      _controllerMin.text = m;
+                                      _controllerSec.text = s;
+                                    });
+                                    _startFloatTimer();
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                    height: 50,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        "$h:$m:$s",
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+
+                            // ==== 新增「＋」按鈕 ====
+                            GestureDetector(
+                              onTap: () async {
+                                final total = countDownHours * 3600 +
+                                    countDownMinutes * 60 +
+                                    countDownSeconds;
+                                if (total == 0) return;
+                                final newDuration = Duration(seconds: total);
+
+                                setState(() {
+                                  if (!savedTimers.contains(newDuration)) {
+                                    savedTimers.add(newDuration);
+                                  }
+                                });
+
+                                await _saveTimers(); //儲存到本地
+                              },
+
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: const Color.fromARGB(70, 100, 100, 255),
+                                  borderRadius: BorderRadius.circular(40),
+                                ),
+                                height: 40,
+                                width: 40,
+                                child: const Icon(Icons.add, color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+
+                      const SizedBox(height: 20),
+                      const Spacer(),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_rounded),
+                          onPressed: () {
+                            _pageController.animateToPage(
+                              0,
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeInOut,
+                            );
+                          },
+                        ),
+                        SizedBox(height: 12,),
+                        const Text('設定',
+                            style:
+                            TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 10),
+                        InkWell(
+                          onTap: _openSoundPickerDialog,
+                          focusColor: Colors.transparent,
+                          splashColor: Colors.transparent,
+                          highlightColor: Colors.transparent,
+                          hoverColor: Colors.transparent,
+                          child:Container(
+                            padding: EdgeInsets.all(10),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(' 音效',
+                                    style:
+                                    TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF7F7FF8))),
+                                SizedBox(height: 8,),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                                  height: 70,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(24),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.volume_up_rounded,
+                                        color: Colors.black54,
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            "計時結束提示音",
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold
+                                            ),
+                                          ),
+                                          Text(
+                                            selectedSoundPath == null
+                                                ? "預設音效"
+                                                : "已選擇：${selectedSoundPath!.split('\\').last}",
+                                            style: const TextStyle(fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                      Spacer(),
+                                      Icon(
+                                        Icons.chevron_right_rounded,
+                                        color: Colors.black54,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ),
-                    );
-                  }).toList(),
+                        // Container(
+                        //   padding: EdgeInsets.all(10),
+                        //   child: Column(
+                        //     crossAxisAlignment: CrossAxisAlignment.start,
+                        //     children: [
+                        //       const Text(' 面板',
+                        //           style:
+                        //           TextStyle(
+                        //               fontSize: 14,
+                        //               fontWeight: FontWeight.bold,
+                        //               color: Color(0xFF7F7FF8))),
+                        //       SizedBox(height: 8,),
+                        //       Container(
+                        //         padding: const EdgeInsets.symmetric(horizontal: 24),
+                        //         height: 70,
+                        //         decoration: BoxDecoration(
+                        //           color: Colors.white,
+                        //           borderRadius: BorderRadius.circular(24),
+                        //         ),
+                        //         child: Row(
+                        //           children: [
+                        //             Icon(
+                        //               Icons.volume_up_rounded,
+                        //               color: Colors.black54,
+                        //             ),
+                        //             const SizedBox(width: 16),
+                        //             Column(
+                        //               mainAxisAlignment: MainAxisAlignment.center,
+                        //               crossAxisAlignment: CrossAxisAlignment.start,
+                        //               children: [
+                        //                 Text(
+                        //                   "計時結束提示音",
+                        //                   style: const TextStyle(
+                        //                       fontSize: 12,
+                        //                       fontWeight: FontWeight.bold
+                        //                   ),
+                        //                 ),
+                        //                 Text(
+                        //                   selectedSoundPath == null
+                        //                       ? "預設音效"
+                        //                       : "已選擇：${selectedSoundPath!.split('\\').last}",
+                        //                   style: const TextStyle(fontSize: 12),
+                        //                 ),
+                        //               ],
+                        //             ),
+                        //             Spacer(),
+                        //             Icon(
+                        //               Icons.chevron_right_rounded,
+                        //               color: Colors.black54,
+                        //             ),
+                        //           ],
+                        //         ),
+                        //       ),
+                        //       const SizedBox(height: 20),
+                        //     ],
+                        //   ),
+                        // ),
 
-                  // ==== 新增「＋」按鈕 ====
-                  GestureDetector(
-                    onTap: () async {
-                      final total = countDownHours * 3600 +
-                          countDownMinutes * 60 +
-                          countDownSeconds;
-                      if (total == 0) return;
-                      final newDuration = Duration(seconds: total);
 
-                      setState(() {
-                        if (!savedTimers.contains(newDuration)) {
-                          savedTimers.add(newDuration);
-                        }
-                      });
-
-                      await _saveTimers(); //儲存到本地
-                    },
-
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: const Color.fromARGB(70, 100, 100, 255),
-                        borderRadius: BorderRadius.circular(40),
-                      ),
-                      height: 40,
-                      width: 40,
-                      child: const Icon(Icons.add, color: Colors.white),
+                      ],
                     ),
                   ),
                 ],
               ),
-            ),
-
-
-            const SizedBox(height: 20),
-            // Container(
-            //   padding: const EdgeInsets.all(12),
-            //   margin: const EdgeInsets.all(12),
-            //   child: Column(
-            //     crossAxisAlignment: CrossAxisAlignment.start,
-            //     children: [
-            //       const Text('設定',
-            //           style:
-            //           TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            //       const SizedBox(height: 10),
-            //       Container(
-            //         padding: const EdgeInsets.symmetric(horizontal: 18),
-            //         height: 60,
-            //         decoration: BoxDecoration(
-            //           color: Colors.white,
-            //           borderRadius: BorderRadius.circular(18),
-            //         ),
-            //         child: Row(
-            //           children: const [
-            //             Text('Always on Top', style: TextStyle(fontSize: 16)),
-            //           ],
-            //         ),
-            //       ),
-            //     ],
-            //   ),
-            // ),
-            const Spacer(),
+            )
           ],
         ),
       ),
@@ -688,27 +972,41 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
   bool running = true;
   bool hoveringWindow = false;
   bool hoveringButtons = false;
+  bool selectingAddTime = false;   // ⭐ 新增：是否正在加時模式
+
   bool _isBlinking = false;
   bool _blinkVisible = true;
 
   final AudioPlayer _alarmPlayer = AudioPlayer();
   bool _isAlarmPlaying = false;
 
+  // =======================
+  // 音效
+  // =======================
   Future<void> _playAlarm() async {
-    if (_isAlarmPlaying) return; // 防止重複播放
+    if (_isAlarmPlaying) return;
     _isAlarmPlaying = true;
 
-    await _alarmPlayer.setReleaseMode(ReleaseMode.loop); // 🔁 持續重複播放
-    await _alarmPlayer.play(AssetSource('sounds/done.mp3')); // 播放你的音效
+    final prefs = await SharedPreferences.getInstance();
+    final String? path = prefs.getString("selected_mp3");
+
+    if (path != null) {
+      await _alarmPlayer.play(DeviceFileSource(path));
+    } else {
+      await _alarmPlayer.play(AssetSource('sounds/done.mp3'));
+    }
   }
 
   Future<void> _stopAlarm() async {
     if (_isAlarmPlaying) {
-      await _alarmPlayer.stop(); // 立即停止
+      await _alarmPlayer.stop();
       _isAlarmPlaying = false;
     }
   }
 
+  // =======================
+  // 初始化
+  // =======================
   @override
   void initState() {
     super.initState();
@@ -716,7 +1014,9 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
     _startCountdown();
   }
 
-  // 啟動倒數計時
+  // =======================
+  // 倒數邏輯
+  // =======================
   void _startCountdown() {
     timer?.cancel();
     timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -727,18 +1027,15 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
         timer?.cancel();
         setState(() => running = false);
         _startBlink();
-        _playAlarm(); //播放提示音
+        _playAlarm();
       }
-
-
-
-
     });
   }
 
   void _startBlink() {
     if (_isBlinking) return;
     setState(() => _isBlinking = true);
+
     blinkTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
       if (!mounted) return;
       setState(() => _blinkVisible = !_blinkVisible);
@@ -766,13 +1063,13 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
   void _reset() {
     timer?.cancel();
     _stopBlink();
-    _stopAlarm(); // 關閉提示音
+    _stopAlarm();
+
     setState(() {
       remaining = widget.initialDuration;
       running = false;
     });
   }
-
 
   @override
   void dispose() {
@@ -782,16 +1079,54 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
     super.dispose();
   }
 
+  // =======================
+  // 加時按鈕元件
+  // =======================
+  Widget _addInlineButton(String label, int sec) {
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          remaining += Duration(seconds: sec);
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 50,
+        height: 30,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // =======================
+  // UI
+  // =======================
   @override
   Widget build(BuildContext context) {
     final String timeStr =
-        "${remaining.inHours.toString().padLeft(2, '0')}:${(remaining.inMinutes % 60).toString().padLeft(2, '0')}:${(remaining.inSeconds % 60).toString().padLeft(2, '0')}";
+        "${remaining.inHours.toString().padLeft(2, '0')}:"
+        "${(remaining.inMinutes % 60).toString().padLeft(2, '0')}:"
+        "${(remaining.inSeconds % 60).toString().padLeft(2, '0')}";
 
     return MouseRegion(
       onEnter: (_) => setState(() => hoveringWindow = true),
       onExit: (_) => setState(() {
         hoveringWindow = false;
         hoveringButtons = false;
+        selectingAddTime = false; // ⭐ 滑鼠離開 → 回原本狀態
       }),
       child: GestureDetector(
         onPanStart: (details) async {
@@ -801,10 +1136,10 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: hoveringWindow
-                ? const Color.fromARGB(255, 50, 50, 50)
-                : Colors.white,
+            color:
+            hoveringWindow ? const Color.fromARGB(255, 50, 50, 50) : Colors.white,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.15),
@@ -814,121 +1149,183 @@ class _FloatTimerWindowState extends State<FloatTimerWindow> {
               ),
             ],
           ),
-          padding: const EdgeInsets.all(12),
           child: Stack(
             alignment: Alignment.center,
             children: [
+              // =======================
+              // 時間顯示
+              // =======================
               Column(
-                mainAxisAlignment: MainAxisAlignment.start,
                 children: [
-                  // mac 紅鍵
-                  Row(
-                    children: [
-                      AnimatedOpacity(
-                        opacity: hoveringWindow ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 200),
-                        child: GestureDetector(
-                          onTap: () async {
-                            _stopAlarm(); // 關閉提示音
-                            await windowManager.setAlwaysOnTop(false);
-                            await windowManager.setSize(const Size(900, 610));
-                            await windowManager.center();
-                            await Future.delayed(
-                                const Duration(milliseconds: 150));
-                            if (!mounted) return;
-                            Navigator.of(context).pushAndRemoveUntil(
-                              MaterialPageRoute(
-                                  builder: (_) => const SettingPage()),
-                                  (route) => false,
-                            );
-                          },
-                          child: Container(
-                            width: 18,
-                            height: 18,
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.close_rounded,
-                                size: 10, color: Colors.white),
+                  Row(children: [
+                    AnimatedOpacity(
+                      opacity: hoveringWindow ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: GestureDetector(
+                        onTap: () async {
+                          _stopAlarm();
+                          await windowManager.setAlwaysOnTop(false);
+                          await windowManager.setSize(const Size(900, 610));
+                          await windowManager.center();
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(builder: (_) => const SettingPage()),
+                                (route) => false,
+                          );
+                        },
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
                           ),
+                          child: const Icon(Icons.close_rounded,
+                              size: 10, color: Colors.white),
                         ),
                       ),
-                    ],
-                  ),
-
-                  // 時間顯示
+                    ),
+                  ]),
                   AnimatedOpacity(
                     opacity: _blinkVisible ? 1.0 : 0.0,
                     duration: const Duration(milliseconds: 200),
-                    child: Text(
-                      timeStr,
-                      style: TextStyle(
-                        fontSize: 36,
-                        color:
-                        hoveringWindow ? Colors.black12 : Colors.black,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'Consolas',
-                      ),
+
+                    child:
+                      DefaultTextStyle(
+                        style: TextStyle(decoration: TextDecoration.none),
+                        child: Text(
+                          timeStr,
+                          selectionColor: Colors.transparent,
+
+                          style: TextStyle(
+                            fontSize: 36,
+                            color:
+                            hoveringWindow ? Colors.black12 : Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'Consolas',
+                          ),
+                        ),
                     ),
                   ),
-
                   const Spacer(),
                 ],
               ),
 
-              // 中央浮動按鈕
+              // =======================
+              // 中央按鈕群
+              // =======================
               MouseRegion(
                 onEnter: (_) => setState(() => hoveringButtons = true),
-                onExit: (_) => setState(() => hoveringButtons = false),
+                onExit: (_) => setState(() {
+                  hoveringButtons = false;
+                  selectingAddTime = false; // ⭐ 離開按鈕區 → 回原始狀態
+                }),
                 child: AnimatedOpacity(
                   opacity: hoveringButtons ? 1.0 : 0.0,
                   duration: const Duration(milliseconds: 200),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // 暫停/繼續
-                      GestureDetector(
-                        onTap: _togglePause,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          width: 50,
-                          height: 50,
-                          decoration: BoxDecoration(
-                            color: running
-                                ? const Color.fromARGB(255, 80, 80, 135)
-                                : const Color.fromARGB(255, 100, 100, 255),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Icon(
-                            running
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            color: Colors.white,
-                            size: 30,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      // 重設
-                      GestureDetector(
-                        onTap: _reset,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          width: 50,
-                          height: 50,
-                          decoration: BoxDecoration(
-                            color:
-                            const Color.fromARGB(160, 100, 100, 100),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: const Icon(
-                            Icons.refresh_rounded,
-                            color: Colors.white,
-                            size: 28,
+
+                      if (!selectingAddTime) ...[
+                        // =======================
+                        // 原本按鈕
+                        // =======================
+                        GestureDetector(
+                          onTap: _togglePause,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: running
+                                  ? const Color.fromARGB(255, 80, 80, 135)
+                                  : const Color.fromARGB(255, 100, 100, 255),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Icon(
+                              running ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                              color: Colors.white,
+                              size: 30,
+                            ),
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 16),
+
+                        GestureDetector(
+                          onTap: _reset,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: const Color.fromARGB(160, 100, 100, 100),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Icon(
+                              Icons.refresh_rounded,
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+
+                        GestureDetector(
+                          onTap: () {
+                            setState(() => selectingAddTime = true);
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: const Color.fromARGB(160, 100, 100, 100),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Icon(
+                              Icons.add_alarm,
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                          ),
+                        ),
+                      ],
+
+                      if (selectingAddTime) ...[
+                        // =======================
+                        // 加時按鈕模式
+                        // =======================
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            DefaultTextStyle(
+                              style: TextStyle(decoration: TextDecoration.none),
+                              child: Text(
+                                timeStr,
+                                selectionColor: Colors.transparent,
+
+                                style: TextStyle(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'Consolas',
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                            Row(
+                              children: [
+                                _addInlineButton("+5", 5),
+                                const SizedBox(width: 12),
+                                _addInlineButton("+10", 10),
+                                const SizedBox(width: 12),
+                                _addInlineButton("+30", 30),
+                              ],
+                            )
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
