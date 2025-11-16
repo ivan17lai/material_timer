@@ -39,6 +39,8 @@ dependencies:
   shared_preferences: ^2.3.2
   audioplayers: ^6.1.0
   file_selector: ^1.0.2
+  google_fonts: ^6.3.2
+  desktop_multi_window: ^0.2.0
 
 
 
