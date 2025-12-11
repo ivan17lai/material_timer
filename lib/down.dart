@@ -4,7 +4,9 @@ import 'theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:async/async.dart';
 import 'dart:async';
-import 'countdown_widget.dart';
+import 'dart:convert';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+
 
 class DownPage extends StatefulWidget{
   const DownPage({super.key});
@@ -175,20 +177,26 @@ class _DownPageState extends State<DownPage>{
                     icon: Icon(
                         Icons.play_arrow,
                         color: colors.onTertiaryContainer,
-                        size: 32
+                        size: 32,
                     ),
-                    onPressed: () {
-                      showDialog(
-                        context: context,
-                        barrierColor: Colors.black26,     // 背景半透明
-                        barrierDismissible: true,
-                        builder: (_) => const DraggableResizableWindow(
-                          child: Center(
-                            child: Text('這裡是自訂內容'),
-                          ),
-                        ),
-                      );
-                    },
+                      onPressed: () async {
+                        final int totalSeconds =
+                            pickTime[0] * 3600 + pickTime[1] * 60 + pickTime[2];
+
+                        // 如果是 0 秒，就不開視窗（避免開一個 00:00:00）
+                        if (totalSeconds <= 0) {
+                          return;
+                        }
+                        await openNewWindow(
+                          type: "timer",
+                          title: "Material Timer",
+                          data: {
+                            "initSeconds": totalSeconds,
+                          },
+                          position: const Offset(1400, 200),
+                          size: const Size(280, 170),
+                        );
+                      }
                   ),
                 ),
               ],
@@ -288,4 +296,30 @@ class _TimePickerBoxState extends State<TimePickerBox> {
       ),
     );
   }
+}
+
+
+// open countdown window
+Future<int> openNewWindow({
+  required String type,               // 視窗用途，例如 "timer"
+  Map<String, dynamic>? data,         // 你要傳給子視窗的資料
+  Offset position = const Offset(1200, 200),  // 預設位置
+  Size size = const Size(280, 100),           // 預設視窗大小
+  String title = "New Window",               // 視窗標題
+}) async {
+  // 1. 建立新視窗，傳遞參數（使用 JSON 字串）
+  final window = await DesktopMultiWindow.createWindow(
+    jsonEncode({
+      "type": type,
+      "data": data ?? {},
+    }),
+  );
+
+  // 2. 視窗外觀設定
+  window
+    ..setFrame(position & size)
+    ..setTitle(title)
+    ..show();
+
+  return window.windowId;
 }
