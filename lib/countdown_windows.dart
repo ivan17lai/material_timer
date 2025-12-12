@@ -163,18 +163,17 @@ class _MiniTimerPageState extends State<_MiniTimerPage> {
           setState(() {
             _running = false;
           });
-          _onTimerFinished(); // ✅ 到 0 播結束鈴聲（會看 config）
+          _onTimerFinished();
         } else {
           setState(() {
             _seconds--;
           });
-
-          // ✅ 接近結束時播提示音（只播一次，且要開關 ON）
           if (_enableWarningSound &&
               !_hasPlayedWarning &&
-              _seconds <= _warningThreshold) {
+              _seconds <= _warningThreshold &&
+              _seconds > 0
+          ) {
             _playWarningSound();
-            _hasPlayedWarning = true;
           }
         }
       });

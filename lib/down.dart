@@ -6,149 +6,195 @@ import 'package:async/async.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'config.dart';
 
-
-class DownPage extends StatefulWidget{
+class DownPage extends StatefulWidget {
   const DownPage({super.key});
 
   @override
   State<DownPage> createState() => _DownPageState();
 }
 
-class _DownPageState extends State<DownPage>{
-
+class _DownPageState extends State<DownPage> {
   List<int> pickTime = [0, 0, 0];
   int pickedIndex = 0;
 
+  /// ✅ 儲存的 timer（秒），最多三個（由 config.dart 的 loadSavedTimers 保證）
+  List<int> savedTimes = [];
+
+  /// ✅ 刪除模式：true 時點擊 Saved Timer 會刪除
+  bool _deleteMode = false;
+
   @override
-  Widget build(BuildContext context){
+  void initState() {
+    super.initState();
+    _loadSaved();
+  }
+
+  Future<void> _loadSaved() async {
+    final list = await loadSavedTimers();
+    if (!mounted) return;
+    setState(() => savedTimes = list);
+  }
+
+  int _toSeconds(List<int> hms) {
+    return hms[0] * 3600 + hms[1] * 60 + hms[2];
+  }
+
+  void _applySecondsToPicker(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+
+    setState(() {
+      pickTime = [h, m, s];
+      pickedIndex = 3;
+    });
+  }
+
+  String _formatSeconds(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    return '${h.toString().padLeft(2, '0')}:'
+        '${m.toString().padLeft(2, '0')}:'
+        '${s.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _saveCurrentTimer() async {
+    final totalSeconds = _toSeconds(pickTime);
+    if (totalSeconds <= 0) return;
+
+    await saveTimer(totalSeconds);
+    final list = await loadSavedTimers();
+    if (!mounted) return;
+    setState(() => savedTimes = list);
+  }
+
+  Future<void> _removeSavedTimer(int seconds) async {
+    await removeTimer(seconds);
+    final list = await loadSavedTimers();
+    if (!mounted) return;
+
+    setState(() {
+      savedTimes = list;
+
+      // ✅ 如果刪到沒東西了，自動離開刪除模式（可選，但體驗好）
+      if (savedTimes.isEmpty) {
+        _deleteMode = false;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final TextTheme textTheme = theme.textTheme;
     final ColorScheme colors = theme.colorScheme;
     final w = MediaQuery.of(context).size.width;
 
-    Widget timePicker({
-      required double size,
-      required bool picked,
-      required Color background,
-      required TextStyle textStyle,
-      required String text,
-      required double borderRadius,
-      required void Function(bool isUp) onTapHalf,
-    }) {
-      return GestureDetector(
-        onTapDown: (details) {
-          double half = size / 2;
-          bool isUp = details.localPosition.dy < half;
-          onTapHalf(isUp);
-        },
-        child: AnimatedContainer(
-          duration: Duration(milliseconds: 150),
-          curve: Curves.easeInOut,
-          width: picked? size * 1.2 : size * 1,
-          height: size,
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.all(Radius.circular(borderRadius)),
-          ),
-          child: Center(
-            child: Text(
-              text,
-              style: textStyle,
-            ),
-          ),
-        ),
-      );
-    }
-
-
     return Scaffold(
-      body: Center(
-        child:Column(
+      body: Container(
+        padding: const EdgeInsets.all(30),
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            const Spacer(),
+
+            // =========================
+            // 上方：時間選擇（H/M/S）
+            // =========================
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 TimePickerBox(
                   size: w * 0.12,
-                  borderRadius: (pickedIndex==0)? 24 : 40,
-                  picked: (pickedIndex==0)? true : false,
-                  background: (pickedIndex==0)? colors.secondaryContainer : colors.surface,
+                  borderRadius: (pickedIndex == 0) ? 24 : 40,
+                  picked: pickedIndex == 0,
+                  background: (pickedIndex == 0)
+                      ? colors.secondaryContainer
+                      : colors.surface,
                   textStyle: GoogleFonts.robotoMono(
                     fontSize: textTheme.displayLarge?.fontSize ?? 48,
                   ),
                   text: pickTime[0].toString().padLeft(2, '0'),
                   onTapHalf: (isUp) {
-                    if(pickedIndex == 0){
+                    if (pickedIndex == 0) {
                       if (isUp) {
                         if (pickTime[0] < 99) pickTime[0]++;
                       } else {
                         if (pickTime[0] > 0) pickTime[0]--;
                       }
-                    }else{
+                    } else {
                       pickedIndex = 0;
                     }
                     setState(() {});
                   },
                 ),
-
                 SizedBox(width: w * 0.01),
                 TimePickerBox(
                   size: w * 0.12,
-                  borderRadius: (pickedIndex==1)? 24 : 40,
-                  picked: (pickedIndex==1)? true : false,
-                  background: (pickedIndex==1)? colors.secondaryContainer : colors.surface,
+                  borderRadius: (pickedIndex == 1) ? 24 : 40,
+                  picked: pickedIndex == 1,
+                  background: (pickedIndex == 1)
+                      ? colors.secondaryContainer
+                      : colors.surface,
                   textStyle: GoogleFonts.robotoMono(
                     fontSize: textTheme.displayLarge?.fontSize ?? 48,
                   ),
                   text: pickTime[1].toString().padLeft(2, '0'),
                   onTapHalf: (isUp) {
-                    if(pickedIndex == 1){
+                    if (pickedIndex == 1) {
                       if (isUp) {
                         if (pickTime[1] < 59) pickTime[1]++;
                       } else {
                         if (pickTime[1] > 0) pickTime[1]--;
                       }
-                    }else{
+                    } else {
                       pickedIndex = 1;
                     }
                     setState(() {});
                   },
                 ),
-
                 SizedBox(width: w * 0.01),
                 TimePickerBox(
                   size: w * 0.12,
-                  borderRadius: (pickedIndex==2)? 24 : 40,
-                  picked: (pickedIndex==2)? true : false,
-                  background: (pickedIndex==2)? colors.secondaryContainer : colors.surface,
+                  borderRadius: (pickedIndex == 2) ? 24 : 40,
+                  picked: pickedIndex == 2,
+                  background: (pickedIndex == 2)
+                      ? colors.secondaryContainer
+                      : colors.surface,
                   textStyle: GoogleFonts.robotoMono(
                     fontSize: textTheme.displayLarge?.fontSize ?? 48,
                   ),
                   text: pickTime[2].toString().padLeft(2, '0'),
                   onTapHalf: (isUp) {
-                    if(pickedIndex == 2){
+                    if (pickedIndex == 2) {
                       if (isUp) {
                         if (pickTime[2] < 59) pickTime[2]++;
                       } else {
                         if (pickTime[2] > 0) pickTime[2]--;
                       }
-                    }else{
+                    } else {
                       pickedIndex = 2;
                     }
                     setState(() {});
                   },
                 ),
-
               ],
             ),
-            SizedBox(height: 30,),
+
+            const SizedBox(height: 30),
+
+            // =========================
+            // 中間：控制按鈕
+            // =========================
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // refresh -> 重置
                 Container(
                   decoration: BoxDecoration(
                     color: colors.surfaceContainerHighest,
@@ -156,9 +202,9 @@ class _DownPageState extends State<DownPage>{
                   ),
                   child: IconButton(
                     icon: Icon(
-                        Icons.refresh,
-                        color: colors.outline,
-                        size: 32
+                      Icons.refresh,
+                      color: colors.outline,
+                      size: 32,
                     ),
                     onPressed: () {
                       pickTime = [0, 0, 0];
@@ -167,7 +213,10 @@ class _DownPageState extends State<DownPage>{
                     },
                   ),
                 ),
-                SizedBox(width: 10,),
+
+                const SizedBox(width: 10),
+
+                // play -> 開小窗（並且自動存到 saved timers）
                 Container(
                   decoration: BoxDecoration(
                     color: colors.tertiaryContainer,
@@ -175,39 +224,175 @@ class _DownPageState extends State<DownPage>{
                   ),
                   child: IconButton(
                     icon: Icon(
-                        Icons.play_arrow,
-                        color: colors.onTertiaryContainer,
-                        size: 32,
+                      Icons.play_arrow,
+                      color: colors.onTertiaryContainer,
+                      size: 32,
                     ),
-                      onPressed: () async {
-                        final int totalSeconds =
-                            pickTime[0] * 3600 + pickTime[1] * 60 + pickTime[2];
+                    onPressed: () async {
+                      final int totalSeconds = _toSeconds(pickTime);
 
-                        // 如果是 0 秒，就不開視窗（避免開一個 00:00:00）
-                        if (totalSeconds <= 0) {
-                          return;
-                        }
-                        await openNewWindow(
-                          type: "timer",
-                          title: "Material Timer",
-                          data: {
-                            "initSeconds": totalSeconds,
-                          },
-                          position: const Offset(1400, 200),
-                          size: const Size(280, 170),
-                        );
-                      }
+                      if (totalSeconds <= 0) return;
+
+                      // ✅ 開窗前也存起來（最新在最前，最多三個）
+                      await saveTimer(totalSeconds);
+                      final list = await loadSavedTimers();
+                      if (mounted) setState(() => savedTimes = list);
+
+                      await openNewWindow(
+                        type: "timer",
+                        title: "Material Timer",
+                        data: {
+                          "initSeconds": totalSeconds,
+                          "mainWindowId": 0,
+                        },
+                        position: const Offset(1400, 200),
+                        size: const Size(280, 170),
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(width: 16),
+
+                // bookmark_add -> 只儲存（不開窗）
+                Container(
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.bookmark_add,
+                      color: colors.outline,
+                      size: 28,
+                    ),
+                    onPressed: () async {
+                      await _saveCurrentTimer();
+                    },
                   ),
                 ),
               ],
-            )
+            ),
+
+            const Spacer(),
+
+            // =========================
+            // 下方：Saved Timer（最多三個）
+            // 1) 右側編輯 icon：切換刪除模式
+            // 2) 刪除模式時點 chip 刪除；非刪除模式點 chip 套用
+            // =========================
+            Column(
+              mainAxisAlignment: MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    const SizedBox(width: 4),
+                    Text(
+                      "Saved Timer",
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+
+                    const SizedBox(width: 6),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                if (savedTimes.isEmpty)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: colors.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 10,
+                    ),
+                    child: Text(
+                      "沒有已儲存的計時器",
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                else
+                  Row(
+                    children: [
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: savedTimes.take(3).map((sec) {
+                          return GestureDetector(
+                            onTap: () async {
+                              if (_deleteMode) {
+                                await _removeSavedTimer(sec);
+                              } else {
+                                _applySecondsToPicker(sec);
+                              }
+                            },
+
+                            onLongPress: () async {
+                              await _removeSavedTimer(sec);
+                            },
+
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: _deleteMode? colors.errorContainer : colors.surfaceContainerHigh,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              padding: const EdgeInsets.only(
+                                left: 18,
+                                right: 18,
+                                top: 8,
+                                bottom: 8,
+                              ),
+                              child: Text(
+                                _formatSeconds(sec),
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.robotoMono(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: colors.onSurface,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(width: 8),
+                      // 編輯/刪除模式按鈕
+                      Container(
+                        decoration: BoxDecoration(
+                          color: colors.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: IconButton(
+                          tooltip: _deleteMode ? '刪除模式' : '編輯',
+                          icon: Icon(
+                            _deleteMode ? Icons.clear : Icons.edit,
+                            color: _deleteMode ? Colors.red : colors.outline,
+                            size: 18,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _deleteMode = !_deleteMode;
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 }
-
 
 class TimePickerBox extends StatefulWidget {
   final double size;
@@ -268,16 +453,13 @@ class _TimePickerBoxState extends State<TimePickerBox> {
         _isUp = local.dy < size / 2;
         widget.onTapHalf(_isUp);
       },
-
       onLongPressStart: (details) {
         final local = details.localPosition;
         _isUp = local.dy < size / 2;
         _startHoldTimer();
       },
-
       onLongPressEnd: (_) => _stopHoldTimer(),
       onLongPressCancel: _stopHoldTimer,
-
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         curve: Curves.easeInOut,
@@ -298,16 +480,14 @@ class _TimePickerBoxState extends State<TimePickerBox> {
   }
 }
 
-
 // open countdown window
 Future<int> openNewWindow({
-  required String type,               // 視窗用途，例如 "timer"
-  Map<String, dynamic>? data,         // 你要傳給子視窗的資料
-  Offset position = const Offset(1200, 200),  // 預設位置
-  Size size = const Size(280, 100),           // 預設視窗大小
-  String title = "New Window",               // 視窗標題
+  required String type, // timer
+  Map<String, dynamic>? data, // 傳給子視窗的資料
+  Offset position = const Offset(1200, 200), // 預設位置
+  Size size = const Size(280, 100), // 預設視窗大小
+  String title = "New Window", // 視窗標題
 }) async {
-  // 1. 建立新視窗，傳遞參數（使用 JSON 字串）
   final window = await DesktopMultiWindow.createWindow(
     jsonEncode({
       "type": type,
@@ -315,7 +495,6 @@ Future<int> openNewWindow({
     }),
   );
 
-  // 2. 視窗外觀設定
   window
     ..setFrame(position & size)
     ..setTitle(title)

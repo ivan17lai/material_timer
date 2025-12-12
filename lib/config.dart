@@ -77,3 +77,90 @@ Future<void> saveConfig(AppConfig config) async {
   final jsonText = const JsonEncoder.withIndent('  ').convert(config.toJson());
   await file.writeAsString(jsonText);
 }
+
+// ==========================
+// ✅ 計時器儲存（不改 AppConfig、不動原本 config 檔）
+// 會另外建立：material_timer_timers.json（放在 exe 同資料夾）
+// ==========================
+
+Future<File> _getTimersFile() async {
+  final exePath = Platform.resolvedExecutable;
+  final exeDir = File(exePath).parent;
+  final timersPath = p.join(exeDir.path, 'material_timer_timers.json');
+  return File(timersPath);
+}
+
+/// 讀取已儲存的計時器（最多 3 個，單位：秒）
+/// 回傳格式：List<int>
+Future<List<int>> loadSavedTimers() async {
+  try {
+    final file = await _getTimersFile();
+    if (!await file.exists()) return [];
+
+    final text = await file.readAsString();
+    final obj = jsonDecode(text);
+
+    if (obj is Map && obj['timers'] is List) {
+      return (obj['timers'] as List)
+          .whereType<num>()
+          .map((e) => e.toInt())
+          .where((e) => e > 0)
+          .take(3)
+          .toList();
+    }
+
+    return [];
+  } catch (_) {
+    return [];
+  }
+}
+
+
+
+/// 儲存一個計時器（秒）
+/// - 去重
+/// - 最新放最前
+/// - 最多 3 個
+Future<void> saveTimer(int seconds) async {
+  if (seconds <= 0) return;
+
+  final timers = await loadSavedTimers();
+
+  // 去重
+  timers.remove(seconds);
+
+  // 最新放前面
+  timers.insert(0, seconds);
+
+  // 最多 3 個
+  if (timers.length > 3) {
+    timers.removeRange(3, timers.length);
+  }
+
+  final file = await _getTimersFile();
+  final jsonText = const JsonEncoder.withIndent('  ').convert({
+    'timers': timers,
+  });
+  await file.writeAsString(jsonText);
+}
+
+/// 刪除指定計時器（秒）
+Future<void> removeTimer(int seconds) async {
+  final timers = await loadSavedTimers();
+  timers.remove(seconds);
+
+  final file = await _getTimersFile();
+  final jsonText = const JsonEncoder.withIndent('  ').convert({
+    'timers': timers,
+  });
+  await file.writeAsString(jsonText);
+}
+
+/// 清空全部計時器
+Future<void> clearSavedTimers() async {
+  final file = await _getTimersFile();
+  final jsonText = const JsonEncoder.withIndent('  ').convert({
+    'timers': <int>[],
+  });
+  await file.writeAsString(jsonText);
+}
