@@ -16,6 +16,7 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (args.isNotEmpty && args[0] == 'multi_window') {
+
     final int windowId = int.tryParse(args[1]) ?? 0;
 
     Map<String, dynamic> argument = {};
