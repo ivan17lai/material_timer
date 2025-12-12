@@ -7,7 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_multi_window
   file_selector_windows
   flutter_acrylic
-  screen_retriever
+  screen_retriever_windows
   window_manager
 )
 

@@ -6,6 +6,8 @@ import 'theme.dart';
 import 'util.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:window_manager/window_manager.dart';
+import 'config.dart';
 
 class MiniTimerWindow extends StatelessWidget {
   final int windowId;
@@ -64,13 +66,16 @@ class _MiniTimerPageState extends State<_MiniTimerPage> {
   late bool _running;
   Timer? _timer;
 
+  // ---- 設定檔 ----
+  AppConfig _config = AppConfig.defaults();
+
   // ---- 音效相關 ----
   final AudioPlayer _endPlayer = AudioPlayer();   // 結束鈴聲
   final AudioPlayer _warnPlayer = AudioPlayer();  // 提示音
 
-  // 這三個就是你要的「變數開關」
   bool _loopEndSound = true;        // 結束鈴聲是否循環
-  bool _enableWarningSound = true;  // 是否啟用提示音
+  bool _endSoundEnabled = true;     // 結束提示音是否啟用（由 config 控制）
+  bool _enableWarningSound = true;  // 即將結束提示音是否啟用
   int _warningThreshold = 10;       // 還剩幾秒時播提示音
 
   bool _hasPlayedWarning = false;   // 避免提示音重複播
@@ -80,7 +85,26 @@ class _MiniTimerPageState extends State<_MiniTimerPage> {
     super.initState();
     _seconds = widget.initSeconds;
     _running = false;
-    _toggle();
+    _initAlwaysOnTop();
+    _initConfigAndStart();
+
+  }
+
+  Future<void> _initAlwaysOnTop() async {
+    await windowManager.ensureInitialized();
+    await windowManager.setAlwaysOnTop(true);
+  }
+
+  /// 讀 config，套用開關 & 秒數，然後再開始倒數
+  Future<void> _initConfigAndStart() async {
+    final cfg = await loadConfig();
+    setState(() {
+      _config = cfg;
+      _endSoundEnabled = cfg.endSoundEnabled;
+      _enableWarningSound = cfg.warningSoundEnabled;
+      _warningThreshold = cfg.warningThreshold;
+    });
+    _toggle(); // 讀完設定再開始倒數
   }
 
   @override
@@ -96,18 +120,29 @@ class _MiniTimerPageState extends State<_MiniTimerPage> {
     _hasPlayedWarning = false;
     await _warnPlayer.stop();
 
+    // 如果「結束提示音」關閉，就什麼都不播
+    if (!_endSoundEnabled) {
+      await _endPlayer.stop();
+      return;
+    }
+
     await _endPlayer.stop();
     await _endPlayer.setReleaseMode(
       _loopEndSound ? ReleaseMode.loop : ReleaseMode.stop,
     );
-    // 這裡換成你自己的檔名路徑
-    await _endPlayer.play(AssetSource('sounds/done.mp3'));
+
+    // 有自訂檔案 → 播電腦檔案；沒有 → 播內建 assets
+    final customPath = _config.customEndSoundPath;
+    if (customPath != null && customPath.isNotEmpty) {
+      await _endPlayer.play(DeviceFileSource(customPath));
+    } else {
+      await _endPlayer.play(AssetSource('sounds/done.mp3'));
+    }
   }
 
   // 播放提示音
   Future<void> _playWarningSound() async {
     await _warnPlayer.stop();
-    // 這裡換成你自己的檔名路徑
     await _warnPlayer.play(AssetSource('sounds/alarm_warning.mp3'));
   }
 
@@ -128,13 +163,13 @@ class _MiniTimerPageState extends State<_MiniTimerPage> {
           setState(() {
             _running = false;
           });
-          _onTimerFinished(); // ✅ 到 0 播結束鈴聲
+          _onTimerFinished(); // ✅ 到 0 播結束鈴聲（會看 config）
         } else {
           setState(() {
             _seconds--;
           });
 
-          // ✅ 接近結束時播提示音（只播一次）
+          // ✅ 接近結束時播提示音（只播一次，且要開關 ON）
           if (_enableWarningSound &&
               !_hasPlayedWarning &&
               _seconds <= _warningThreshold) {
@@ -157,6 +192,7 @@ class _MiniTimerPageState extends State<_MiniTimerPage> {
       _running = false;
       _seconds = widget.initSeconds;
       _hasPlayedWarning = false;
+
     });
   }
 
@@ -164,6 +200,9 @@ class _MiniTimerPageState extends State<_MiniTimerPage> {
   void _add30Seconds() {
     setState(() {
       _seconds += 30;
+      if(!_running){
+        _toggle();
+      }
     });
   }
 
